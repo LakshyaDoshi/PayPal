@@ -13,7 +13,7 @@ import argparse
 import json
 import re
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 # Sensitive keys to redact in JSON payloads
 SENSITIVE_KEYS = {
@@ -41,7 +41,7 @@ BASIC_PATTERN = re.compile(r"(Basic\s+)[A-Za-z0-9+/=]+", re.IGNORECASE)
 def redact_sensitive_values(data: Any) -> Any:
     """Recursively redact sensitive keys and credential patterns."""
     if isinstance(data, dict):
-        sanitized: Dict[str, Any] = {}
+        sanitized: dict[str, Any] = {}
         for k, v in data.items():
             if str(k).lower() in SENSITIVE_KEYS:
                 sanitized[k] = "[REDACTED]"
@@ -57,16 +57,16 @@ def redact_sensitive_values(data: Any) -> Any:
     return data
 
 
-def parse_raw_input(raw: str) -> tuple[Optional[int], Optional[str], Dict[str, Any]]:
+def parse_raw_input(raw: str) -> tuple[int | None, str | None, dict[str, Any]]:
     """
     Parses input which may be:
     - Pure JSON error response
     - Raw HTTP dump with headers and JSON body
     """
     raw = raw.strip()
-    status_code: Optional[int] = None
-    debug_id: Optional[str] = None
-    body_dict: Dict[str, Any] = {}
+    status_code: int | None = None
+    debug_id: str | None = None
+    body_dict: dict[str, Any] = {}
 
     # Check for HTTP status line e.g., "HTTP/1.1 401 Unauthorized" or "Status: 400"
     status_match = re.search(r"(?:HTTP/[\d.]+|Status:?)\s+(\d{3})", raw)
@@ -108,14 +108,16 @@ def parse_raw_input(raw: str) -> tuple[Optional[int], Optional[str], Dict[str, A
     return status_code, debug_id, body_dict
 
 
-def summarize_error(status: Optional[int], debug_id: Optional[str], data: Dict[str, Any]) -> str:
+def summarize_error(status: int | None, debug_id: str | None, data: dict[str, Any]) -> str:
     """Format sanitized PayPal error into a concise diagnostic report."""
     sanitized = redact_sensitive_values(data)
 
     name = sanitized.get("name") or sanitized.get("error") or "UNKNOWN_ERROR"
-    message = sanitized.get("message") or sanitized.get("error_description") or "No message provided."
-    details: List[Dict[str, Any]] = sanitized.get("details", [])
-    links: List[Dict[str, Any]] = sanitized.get("links", [])
+    message = (
+        sanitized.get("message") or sanitized.get("error_description") or "No message provided."
+    )
+    details: list[dict[str, Any]] = sanitized.get("details", [])
+    links: list[dict[str, Any]] = sanitized.get("links", [])
 
     lines = [
         "==================================================================",
@@ -129,8 +131,9 @@ def summarize_error(status: Optional[int], debug_id: Optional[str], data: Dict[s
 
     if debug_id:
         lines.append(
-            f" Log Lookup   : https://developer.paypal.com/dashboard/dashboardSandboxApiCalls (ID: {debug_id})"
+            " Log Lookup   : https://developer.paypal.com/dashboard/dashboardSandboxApiCalls"
         )
+        lines.append(f"                (Debug ID: {debug_id})")
 
     if details and isinstance(details, list):
         lines.append("\n Error Details:")
@@ -167,7 +170,7 @@ def main() -> int:
         "file_or_json",
         nargs="?",
         default=None,
-        help="Path to file containing failed PayPal response, or raw JSON string. If omitted, reads from stdin.",
+        help="Path to response file or raw JSON. If omitted, reads stdin.",
     )
     parser.add_argument(
         "--json",
@@ -180,7 +183,7 @@ def main() -> int:
     raw_text: str = ""
     if args.file_or_json:
         try:
-            with open(args.file_or_json, "r", encoding="utf-8") as f:
+            with open(args.file_or_json, encoding="utf-8") as f:
                 raw_text = f.read()
         except OSError:
             # Treat argument as inline raw JSON/string

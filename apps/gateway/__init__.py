@@ -1,0 +1,3 @@
+"""
+Gateway application module.
+"""

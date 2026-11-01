@@ -1,0 +1,517 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "MandateGate Gateway API",
+    "description": "MCP gateway between AI agents and PayPal (Sandbox only).",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Health Check",
+        "description": "Verify service health and sandbox connectivity status.",
+        "operationId": "health_check_healthz_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Check Healthz Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mandates": {
+      "post": {
+        "tags": [
+          "Mandates"
+        ],
+        "summary": "Register Authorized Mandate",
+        "description": "Registers an authorized spending policy defining constraints for agent payments.",
+        "operationId": "create_mandate_mandates_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Mandate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Mandate"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mandates/{mandate_id}": {
+      "get": {
+        "tags": [
+          "Mandates"
+        ],
+        "summary": "Retrieve Mandate",
+        "description": "Fetches an existing mandate policy by identifier.",
+        "operationId": "get_mandate_mandates__mandate_id__get",
+        "parameters": [
+          {
+            "name": "mandate_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mandate Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Mandate"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Submit Payment Request",
+        "description": "Evaluates a payment request against its mandate and executes via PayPal sandbox.",
+        "operationId": "process_payment_payments_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Decision"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/decisions/{decision_id}": {
+      "get": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Retrieve Payment Decision",
+        "description": "Fetches audit record and enforcement decision by ID.",
+        "operationId": "get_decision_decisions__decision_id__get",
+        "parameters": [
+          {
+            "name": "decision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Decision Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Decision"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Decision": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Id",
+            "description": "Unique decision event identifier."
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/Verdict",
+            "description": "Outcome of the evaluation: approve, block, or escalate."
+          },
+          "rule_results": {
+            "items": {
+              "$ref": "#/components/schemas/RuleResult"
+            },
+            "type": "array",
+            "title": "Rule Results",
+            "description": "Individual rule execution results that determined this verdict."
+          },
+          "judge_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Judge Reason",
+            "description": "Optional explanation provided by the LLM safety judge."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "UTC timestamp when the decision was rendered."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "verdict",
+          "created_at"
+        ],
+        "title": "Decision",
+        "description": "Audit record and enforcement verdict produced for a PaymentRequest."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Mandate": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Id",
+            "description": "Unique identifier for the mandate."
+          },
+          "purpose": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Purpose",
+            "description": "The user's original task text and authorization scope."
+          },
+          "max_amount_minor": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Amount Minor",
+            "description": "Total lifetime spending cap allowed by this mandate in minor units (cents)."
+          },
+          "currency": {
+            "type": "string",
+            "maxLength": 3,
+            "minLength": 3,
+            "title": "Currency",
+            "description": "3-letter ISO 4217 currency code (e.g. 'USD')."
+          },
+          "allowed_payees": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Allowed Payees",
+            "description": "List of permitted payee identifiers (emails or merchant IDs)."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At",
+            "description": "UTC expiration timestamp of the mandate."
+          },
+          "approval_threshold_minor": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Threshold Minor",
+            "description": "Optional minor threshold requiring human review."
+          },
+          "max_payments_per_window": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Payments Per Window",
+            "description": "Optional maximum count of payments allowed in a velocity window."
+          },
+          "window_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Seconds",
+            "description": "Optional duration of velocity window in seconds."
+          },
+          "signature": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Signature",
+            "description": "Cryptographic signature guaranteeing mandate integrity."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "purpose",
+          "max_amount_minor",
+          "currency",
+          "allowed_payees",
+          "expires_at",
+          "signature"
+        ],
+        "title": "Mandate",
+        "description": "Authorized spending policy defining constraints for agent payments.\nAmounts must be integer minor units (e.g. USD cents)."
+      },
+      "PaymentRequest": {
+        "properties": {
+          "mandate_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Mandate Id",
+            "description": "Identifier of the mandate authorizing this transaction."
+          },
+          "payee": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Payee",
+            "description": "Target recipient identifier (email or merchant ID)."
+          },
+          "amount_minor": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Amount Minor",
+            "description": "Transaction amount in integer minor units (e.g. cents)."
+          },
+          "currency": {
+            "type": "string",
+            "maxLength": 3,
+            "minLength": 3,
+            "title": "Currency",
+            "description": "3-letter ISO 4217 currency code (e.g. 'USD')."
+          },
+          "memo": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Memo",
+            "description": "Human-readable justification or item description."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "description": "Unique request key to guarantee idempotent execution and prevent replays."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mandate_id",
+          "payee",
+          "amount_minor",
+          "currency",
+          "memo",
+          "idempotency_key"
+        ],
+        "title": "PaymentRequest",
+        "description": "Request initiated by an AI agent to execute a payment against an authorized mandate."
+      },
+      "RuleResult": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "description": "Identifier of the rule executed (e.g. 'budget_limit', 'payee_allowlist')."
+          },
+          "passed": {
+            "type": "boolean",
+            "title": "Passed",
+            "description": "Whether the rule evaluation succeeded."
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Detail",
+            "description": "Diagnostic explanation or context regarding the evaluation outcome.",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "passed"
+        ],
+        "title": "RuleResult",
+        "description": "Result of a single deterministic mandate policy or security rule check."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "Verdict": {
+        "type": "string",
+        "enum": [
+          "approve",
+          "block",
+          "escalate"
+        ],
+        "title": "Verdict",
+        "description": "Decision verdict produced by the MandateGate policy engine."
+      }
+    }
+  }
+}
