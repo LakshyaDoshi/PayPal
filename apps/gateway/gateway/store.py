@@ -118,6 +118,9 @@ CREATE TABLE IF NOT EXISTS spend_ledger (
     decision_id     TEXT NOT NULL,
     amount_minor    INTEGER NOT NULL CHECK(amount_minor > 0),
     currency        TEXT NOT NULL,
+    payee           TEXT NOT NULL DEFAULT '',
+    memo            TEXT NOT NULL DEFAULT '',
+    idempotency_key TEXT NOT NULL DEFAULT '',
     recorded_at     TEXT NOT NULL
 );
 """
@@ -321,6 +324,9 @@ class MandateStore:
         decision_id: str,
         amount_minor: int,
         currency: str,
+        payee: str = "",
+        memo: str = "",
+        idempotency_key: str = "",
     ) -> bool:
         """Atomically reserve *amount_minor* against the mandate budget.
 
@@ -377,12 +383,36 @@ class MandateStore:
                 cur.execute(
                     """
                     INSERT INTO spend_ledger
-                        (mandate_id, decision_id, amount_minor, currency, recorded_at)
-                    VALUES (?, ?, ?, ?, ?)
+                        (mandate_id, decision_id, amount_minor, currency,
+                         payee, memo, idempotency_key, recorded_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (mandate_id, decision_id, amount_minor, currency, _now_iso()),
+                    (
+                        mandate_id,
+                        decision_id,
+                        amount_minor,
+                        currency,
+                        payee,
+                        memo,
+                        idempotency_key,
+                        _now_iso(),
+                    ),
                 )
                 return True
+
+    def list_recent_spends(self, mandate_id: str) -> list[dict[str, Any]]:
+        """Return list of spend ledger records for a mandate in chronological order."""
+        rows = self._conn.execute(
+            """
+            SELECT mandate_id, decision_id, amount_minor, currency,
+                   payee, memo, idempotency_key, recorded_at
+            FROM spend_ledger
+            WHERE mandate_id = ?
+            ORDER BY id ASC
+            """,
+            (mandate_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def total_spent(self, mandate_id: str) -> int:
         """Return total minor units spent under *mandate_id* (0 if none)."""
