@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: mandategate
+    runtime: python
+    region: oregon
+    plan: free
+    branch: main
+    buildCommand: pip install --upgrade pip && pip install -e .
+    startCommand: uvicorn gateway.api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: PYTHONPATH
+        value: apps/gateway:.
+      - key: MANDATE_SIGNING_KEY
+        generateValue: true
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_BASE_URL
+        value: https://api-m.sandbox.paypal.com
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: LLM_API_KEY
+        sync: false
+      - key: JUDGE_MODEL
+        value: gemini-2.5-flash
+      - key: DB_PATH
+        value: mandategate.sqlite3
+      - key: CORS_ORIGINS
+        value: '["*"]'

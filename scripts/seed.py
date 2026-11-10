@@ -59,7 +59,7 @@ if "DB_PATH" not in os.environ:
 
 from gateway.contract import Mandate  # noqa: E402
 from gateway.mandate import sign  # noqa: E402
-from gateway.store import open_store  # noqa: E402
+from gateway.store import MandateStore, open_store  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Demo mandate definition
@@ -87,32 +87,36 @@ _DEMO_MANDATE_DRAFT = Mandate(
 )
 
 
-def run() -> None:
+def run(store: MandateStore | None = None, reset: bool = True) -> Mandate:
     print("=== MandateGate Seed Script ===\n")
 
-    store = open_store()
+    close_when_done = False
+    if store is None:
+        store = open_store()
+        close_when_done = True
 
-    # Reset all tables.
-    print("Resetting database tables...")
-    store.reset()
-    print("  ✓ All tables cleared.\n")
+    # Reset all tables if requested.
+    if reset:
+        print("Resetting database tables...")
+        store.reset()
+        print("  [OK] All tables cleared.\n")
 
     # Sign the demo mandate.
     print("Signing demo mandate...")
     mandate: Mandate = sign(_DEMO_MANDATE_DRAFT)
-    print(f"  ✓ Mandate '{mandate.id}' signed.")
-    print(f"    Signature (first 16 chars): {mandate.signature[:16]}...\n")
+    print(f"  [OK] Mandate '{mandate.id}' signed.")
+    print(f"       Signature (first 16 chars): {mandate.signature[:16]}...\n")
 
     # Persist to store.
     print("Persisting mandate to store...")
     store.save_mandate(mandate)
-    print(f"  ✓ Saved to: {store._db_path}\n")
+    print(f"  [OK] Saved to: {store._db_path}\n")
 
     # Verify round-trip.
     loaded = store.load_mandate(_DEMO_MANDATE_ID)
     assert loaded is not None, "Round-trip load returned None!"
     assert loaded.signature == mandate.signature, "Signature mismatch after load!"
-    print("  ✓ Round-trip load verified.\n")
+    print("  [OK] Round-trip load verified.\n")
 
     # Print sanitized summary.
     print("=== Demo Mandate Summary ===")
@@ -127,9 +131,12 @@ def run() -> None:
         f"{mandate.window_seconds}s"
     )
     print(f"  DB path         : {store._db_path}")
-    print("\nSeed complete. ✓")
+    print("\nSeed complete. [OK]")
 
-    store.close()
+    if close_when_done:
+        store.close()
+
+    return mandate
 
 
 if __name__ == "__main__":

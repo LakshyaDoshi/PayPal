@@ -235,6 +235,14 @@ class MandateStore:
             return None
         return Mandate.model_validate_json(row["json_blob"])
 
+    def count_mandates(self) -> int:
+        """Return the total number of mandates stored in the database."""
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute("SELECT COUNT(*) AS total FROM mandates")
+            row = cur.fetchone()
+            return int(row["total"]) if row else 0
+
     def is_revoked(self, mandate_id: str) -> bool:
         """Return ``True`` if the mandate has been revoked."""
         row = self._conn.execute(

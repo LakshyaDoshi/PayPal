@@ -196,13 +196,81 @@ class CorrelationAndSizeMiddleware(BaseHTTPMiddleware):
 
 
 # ---------------------------------------------------------------------------
-# Application Setup & Lifespan
+# Application Setup, Environment Validation & Lifespan
 # ---------------------------------------------------------------------------
+
+
+def validate_environment() -> None:
+    """Validate required environment variables at application startup.
+
+    Fails startup with a clear message if required variables are missing,
+    without printing any secret values.
+    """
+    missing: list[str] = []
+
+    signing_key = os.environ.get("MANDATE_SIGNING_KEY", "").strip()
+    if not signing_key:
+        missing.append("MANDATE_SIGNING_KEY")
+    elif len(signing_key) < 32:
+        raise RuntimeError(
+            "MandateGate startup failed: MANDATE_SIGNING_KEY must be at least 32 characters long."
+        )
+
+    # Incomplete PayPal credentials check
+    client_id = os.environ.get("PAYPAL_CLIENT_ID", "").strip()
+    client_secret = os.environ.get("PAYPAL_CLIENT_SECRET", "").strip()
+    if bool(client_id) != bool(client_secret):
+        if not client_id:
+            missing.append("PAYPAL_CLIENT_ID (required when PAYPAL_CLIENT_SECRET is provided)")
+        if not client_secret:
+            missing.append("PAYPAL_CLIENT_SECRET (required when PAYPAL_CLIENT_ID is provided)")
+
+    if missing:
+        missing_vars = ", ".join(missing)
+        raise RuntimeError(
+            f"MandateGate startup failed: Missing required environment variable(s): "
+            f"{missing_vars}. Please configure them in your environment or Render dashboard."
+        )
+
+
+def get_cors_origins() -> list[str]:
+    """Parse and return allowed CORS origins from the environment.
+
+    Supports JSON list string: '["http://localhost:3000", "https://app.onrender.com"]'
+    or comma-separated string: 'http://localhost:3000,https://app.onrender.com'
+    Defaults to ["*"] if unset or empty.
+    """
+    raw = os.environ.get("CORS_ORIGINS", "").strip()
+    if not raw:
+        return ["*"]
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(origin).strip() for origin in parsed if str(origin).strip()]
+    except Exception:
+        pass
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return origins if origins else ["*"]
 
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan context managing background resources."""
+    # 1. Fail startup with a clear message if required env vars are missing
+    validate_environment()
+
+    # 2. Startup hook: seed demo data if database is empty (Render free disk resets)
+    store = get_store()
+    if store.count_mandates() == 0:
+        logger.info("Database has no mandates (empty/fresh disk). Executing seed hook...")
+        try:
+            from scripts import seed as seed_script
+
+            seed_script.run(store=store, reset=False)
+            logger.info("Database seed hook completed.")
+        except Exception as e:
+            logger.warning("Database seed hook error: %s", e)
+
     yield
     # Cleanup subscriber queues on shutdown
     _sse_subscribers.clear()
@@ -217,17 +285,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Parse CORS Origins from environment
-_cors_env = os.environ.get("CORS_ORIGINS", "")
-_allowed_origins = ["*"]
-if _cors_env:
-    try:
-        parsed_origins = json.loads(_cors_env)
-        if isinstance(parsed_origins, list):
-            _allowed_origins = [str(o) for o in parsed_origins]
-    except Exception:
-        _allowed_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
-
+# Configure CORS Origins for React front end
+_allowed_origins = get_cors_origins()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
