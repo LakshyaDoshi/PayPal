@@ -313,6 +313,31 @@ class PaymentRequest(BaseModel):
         return v_strip
 
 
+def build_decision_explanation(
+    verdict: Verdict,
+    rule_results: list[RuleResult],
+    judge_reason: str | None = None,
+) -> str:
+    """Build a plain-English explanation of a decision from rule results and judge reason."""
+    if verdict == Verdict.APPROVE:
+        return (
+            "Payment approved: all deterministic mandate policies passed "
+            "and advisory safety judge raised no objections."
+        )
+
+    failed_rules = [r for r in rule_results if not r.passed]
+    details: list[str] = [f"{r.name}: {r.detail}" for r in failed_rules]
+    if judge_reason:
+        details.append(f"judge: {judge_reason}")
+
+    reasons_str = "; ".join(details) if details else "security policy requirements not met"
+
+    if verdict == Verdict.ESCALATE:
+        return f"Payment held for human approval: {reasons_str}."
+
+    return f"Payment blocked: {reasons_str}."
+
+
 class Decision(BaseModel):
     """
     Audit record and enforcement verdict produced for a PaymentRequest.
@@ -342,6 +367,11 @@ class Decision(BaseModel):
         max_length=2000,
         description="Optional explanation provided by the LLM safety judge.",
     )
+    explanation: str = Field(
+        default="",
+        max_length=2000,
+        description="Plain-English explanation built from rule results and judge reason.",
+    )
     created_at: datetime = Field(
         ...,
         description="UTC timestamp when the decision was rendered.",
@@ -351,3 +381,12 @@ class Decision(BaseModel):
     @classmethod
     def check_utc_timestamp(cls, v: Any) -> datetime:
         return _ensure_utc_datetime(v)
+
+    @model_validator(mode="after")
+    def ensure_explanation(self) -> Decision:
+        if not self.explanation:
+            auto_exp = build_decision_explanation(
+                self.verdict, self.rule_results, self.judge_reason
+            )
+            object.__setattr__(self, "explanation", auto_exp)
+        return self

@@ -485,6 +485,60 @@ class MandateStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_pending_approval(self, approval_id: str) -> dict[str, Any] | None:
+        """Return a pending approval record by ID, or None if not found."""
+        row = self._conn.execute(
+            "SELECT * FROM pending_approvals WHERE id = ?", (approval_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_decisions(
+        self, limit: int = 50, offset: int = 0, mandate_id: str | None = None
+    ) -> list[Decision]:
+        """Return decisions in reverse chronological order (newest first)."""
+        if mandate_id:
+            rows = self._conn.execute(
+                """
+                SELECT json_blob FROM decisions
+                WHERE mandate_id = ?
+                ORDER BY rowid DESC
+                LIMIT ? OFFSET ?
+                """,
+                (mandate_id, limit, offset),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """
+                SELECT json_blob FROM decisions
+                ORDER BY rowid DESC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            ).fetchall()
+        return [Decision.model_validate_json(r["json_blob"]) for r in rows]
+
+    def count_decisions(self, mandate_id: str | None = None) -> int:
+        """Return total count of decisions in the audit log."""
+        if mandate_id:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS total FROM decisions WHERE mandate_id = ?",
+                (mandate_id,),
+            ).fetchone()
+        else:
+            row = self._conn.execute("SELECT COUNT(*) AS total FROM decisions").fetchone()
+        return int(row["total"]) if row else 0
+
+    def list_audit_rows(self) -> list[dict[str, Any]]:
+        """Return all raw decision records for cryptographic audit chain inspection."""
+        rows = self._conn.execute(
+            """
+            SELECT id, mandate_id, verdict, prev_hash, hash, created_at
+            FROM decisions
+            ORDER BY rowid ASC
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------

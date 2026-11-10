@@ -6,14 +6,14 @@
     "version": "0.1.0"
   },
   "paths": {
-    "/healthz": {
+    "/health": {
       "get": {
         "tags": [
           "System"
         ],
         "summary": "Health Check",
         "description": "Verify service health and sandbox connectivity status.",
-        "operationId": "health_check_healthz_get",
+        "operationId": "health_check_health_get",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -24,7 +24,7 @@
                     "type": "string"
                   },
                   "type": "object",
-                  "title": "Response Health Check Healthz Get"
+                  "title": "Response Health Check Health Get"
                 }
               }
             }
@@ -37,14 +37,14 @@
         "tags": [
           "Mandates"
         ],
-        "summary": "Register Authorized Mandate",
-        "description": "Registers an authorized spending policy defining constraints for agent payments.",
+        "summary": "Register & Sign Mandate",
+        "description": "Confirms, cryptographically signs, and persists an authorized spending mandate.",
         "operationId": "create_mandate_mandates_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Mandate"
+                "$ref": "#/components/schemas/MandateDraft"
               }
             }
           },
@@ -117,13 +117,321 @@
         }
       }
     },
+    "/mandates/{mandate_id}/revoke": {
+      "post": {
+        "tags": [
+          "Mandates"
+        ],
+        "summary": "Revoke Mandate (Kill Switch)",
+        "description": "Instantly revokes a mandate; takes effect immediately on next transaction.",
+        "operationId": "revoke_mandate_mandates__mandate_id__revoke_post",
+        "parameters": [
+          {
+            "name": "mandate_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mandate Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Revoke Mandate Mandates  Mandate Id  Revoke Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/decisions": {
+      "get": {
+        "tags": [
+          "Audit"
+        ],
+        "summary": "List Decisions (Paginated)",
+        "description": "Returns decisions in reverse chronological order (newest first).",
+        "operationId": "list_decisions_decisions_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "mandate_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Mandate Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Decision"
+                  },
+                  "title": "Response List Decisions Decisions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/decisions/stream": {
+      "get": {
+        "tags": [
+          "Audit"
+        ],
+        "summary": "Decision Live Feed (SSE)",
+        "description": "Server-Sent Events streaming real-time payment decisions as they occur.",
+        "operationId": "stream_decisions_decisions_stream_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pending": {
+      "get": {
+        "tags": [
+          "Approvals"
+        ],
+        "summary": "List Pending Approvals",
+        "description": "Fetches escalated transactions awaiting human review.",
+        "operationId": "list_pending_pending_get",
+        "parameters": [
+          {
+            "name": "mandate_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Mandate Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response List Pending Pending Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pending/{pending_id}/approve": {
+      "post": {
+        "tags": [
+          "Approvals"
+        ],
+        "summary": "Approve Escalated Payment",
+        "description": "Human sign-off: re-verifies mandate before idempotent provider execution.",
+        "operationId": "approve_pending_pending__pending_id__approve_post",
+        "parameters": [
+          {
+            "name": "pending_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Pending Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Approve Pending Pending  Pending Id  Approve Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pending/{pending_id}/deny": {
+      "post": {
+        "tags": [
+          "Approvals"
+        ],
+        "summary": "Deny Escalated Payment",
+        "description": "Human operator rejects an escalated payment request.",
+        "operationId": "deny_pending_pending__pending_id__deny_post",
+        "parameters": [
+          {
+            "name": "pending_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Pending Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Deny Pending Pending  Pending Id  Deny Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit": {
+      "get": {
+        "tags": [
+          "Audit"
+        ],
+        "summary": "Audit Log & Chain Integrity",
+        "description": "Retrieves all decision audit rows and verifies cryptographic chain integrity.",
+        "operationId": "get_audit_log_audit_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/payments": {
       "post": {
         "tags": [
           "Payments"
         ],
-        "summary": "Submit Payment Request",
-        "description": "Evaluates a payment request against its mandate and executes via PayPal sandbox.",
+        "summary": "Process Payment Request",
+        "description": "Evaluates an agent payment request through rules, safety judge, and provider.",
         "operationId": "process_payment_payments_post",
         "requestBody": {
           "content": {
@@ -158,53 +466,50 @@
           }
         }
       }
-    },
-    "/decisions/{decision_id}": {
-      "get": {
-        "tags": [
-          "Payments"
-        ],
-        "summary": "Retrieve Payment Decision",
-        "description": "Fetches audit record and enforcement decision by ID.",
-        "operationId": "get_decision_decisions__decision_id__get",
-        "parameters": [
-          {
-            "name": "decision_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Decision Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Decision"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
     }
   },
   "components": {
     "schemas": {
+      "AuditResponse": {
+        "properties": {
+          "chain_valid": {
+            "type": "boolean",
+            "title": "Chain Valid"
+          },
+          "broken_decision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Broken Decision Id"
+          },
+          "total_records": {
+            "type": "integer",
+            "title": "Total Records"
+          },
+          "rows": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Rows"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "chain_valid",
+          "total_records",
+          "rows"
+        ],
+        "title": "AuditResponse",
+        "description": "Cryptographic audit chain verification status and log rows."
+      },
       "Decision": {
         "properties": {
           "id": {
@@ -238,6 +543,13 @@
             ],
             "title": "Judge Reason",
             "description": "Optional explanation provided by the LLM safety judge."
+          },
+          "explanation": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Explanation",
+            "description": "Plain-English explanation built from rule results and judge reason.",
+            "default": ""
           },
           "created_at": {
             "type": "string",
@@ -373,6 +685,94 @@
         ],
         "title": "Mandate",
         "description": "Authorized spending policy defining constraints for agent payments.\nAmounts must be integer minor units (e.g. USD cents)."
+      },
+      "MandateDraft": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "purpose": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Purpose"
+          },
+          "max_amount_minor": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Amount Minor"
+          },
+          "currency": {
+            "type": "string",
+            "maxLength": 3,
+            "minLength": 3,
+            "title": "Currency"
+          },
+          "allowed_payees": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Allowed Payees"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "approval_threshold_minor": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Threshold Minor"
+          },
+          "max_payments_per_window": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Payments Per Window"
+          },
+          "window_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Seconds"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "purpose",
+          "max_amount_minor",
+          "currency",
+          "allowed_payees",
+          "expires_at"
+        ],
+        "title": "MandateDraft",
+        "description": "Draft policy submitted by UI/user to be confirmed and signed."
       },
       "PaymentRequest": {
         "properties": {
