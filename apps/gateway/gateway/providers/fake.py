@@ -20,10 +20,21 @@ from gateway.providers.base import (
 class FakeProvider(PaymentProvider):
     """Deterministic in-memory payment provider for testing."""
 
-    def __init__(self, *, should_fail: bool = False, fail_error: Exception | None = None) -> None:
-        self.should_fail = should_fail
-        self.fail_error = fail_error
+    def __init__(
+        self,
+        *,
+        should_fail: bool = False,
+        fail_error: Exception | None = None,
+        error_to_raise: Exception | None = None,
+    ) -> None:
+        self.fail_error = error_to_raise if error_to_raise is not None else fail_error
+        self.should_fail = should_fail or (self.fail_error is not None)
         self.calls: list[dict[str, Any]] = []
+
+    @property
+    def call_count(self) -> int:
+        """Total number of method invocations recorded."""
+        return len(self.calls)
 
     def reset(self) -> None:
         """Clear recorded invocation history."""

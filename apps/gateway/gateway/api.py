@@ -539,6 +539,12 @@ async def approve_pending(
             detail="Mandate has been revoked; payment cannot be approved.",
         )
 
+    if store.is_frozen(mandate.id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Mandate is frozen by circuit breaker; payment cannot be approved.",
+        )
+
     if datetime.now(UTC) >= mandate.expires_at:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

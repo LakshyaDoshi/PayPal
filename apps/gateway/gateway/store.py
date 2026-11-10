@@ -123,6 +123,13 @@ CREATE TABLE IF NOT EXISTS spend_ledger (
     idempotency_key TEXT NOT NULL DEFAULT '',
     recorded_at     TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS frozen_mandates (
+    mandate_id      TEXT PRIMARY KEY,
+    reason          TEXT NOT NULL,
+    consecutive_blocks INTEGER NOT NULL,
+    frozen_at       TEXT NOT NULL
+);
 """
 
 
@@ -375,6 +382,15 @@ class MandateStore:
                 ).fetchone()
                 total_spent: int = int(spent_row["total"])
 
+                # Idempotency check: prevent duplicate transactions with same idempotency_key
+                if idempotency_key:
+                    dup_row = cur.execute(
+                        "SELECT 1 FROM spend_ledger WHERE mandate_id = ? AND idempotency_key = ?",
+                        (mandate_id, idempotency_key),
+                    ).fetchone()
+                    if dup_row is not None:
+                        return False
+
                 remaining = mandate.max_amount_minor - total_spent
                 if amount_minor > remaining:
                     return False
@@ -399,6 +415,72 @@ class MandateStore:
                     ),
                 )
                 return True
+
+    def release_spend(self, mandate_id: str, decision_id: str) -> None:
+        """Rollback a reserved spend from spend_ledger if downstream execution failed."""
+        with self._lock:
+            with self._immediate() as cur:
+                cur.execute(
+                    "DELETE FROM spend_ledger WHERE mandate_id = ? AND decision_id = ?",
+                    (mandate_id, decision_id),
+                )
+
+    def consecutive_blocks(self, mandate_id: str) -> int:
+        """Count the number of consecutive recent BLOCK decisions for a mandate."""
+        rows = self._conn.execute(
+            """
+            SELECT verdict FROM decisions
+            WHERE mandate_id = ?
+            ORDER BY rowid DESC
+            LIMIT 100
+            """,
+            (mandate_id,),
+        ).fetchall()
+        count = 0
+        for r in rows:
+            if r["verdict"] == "block":
+                count += 1
+            else:
+                break
+        return count
+
+    def freeze_mandate(
+        self,
+        mandate_id: str,
+        reason: str = "",
+        consecutive_blocks: int = 0,
+    ) -> None:
+        """Freeze a mandate via circuit breaker after repeated failures."""
+        with self._lock:
+            with self._immediate() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO frozen_mandates (mandate_id, reason, consecutive_blocks, frozen_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(mandate_id) DO UPDATE SET
+                        reason = excluded.reason,
+                        consecutive_blocks = excluded.consecutive_blocks,
+                        frozen_at = excluded.frozen_at
+                    """,
+                    (mandate_id, reason, consecutive_blocks, _now_iso()),
+                )
+
+    def is_frozen(self, mandate_id: str) -> bool:
+        """Return True if the mandate is currently frozen by the circuit breaker."""
+        row = self._conn.execute(
+            "SELECT 1 FROM frozen_mandates WHERE mandate_id = ?",
+            (mandate_id,),
+        ).fetchone()
+        return row is not None
+
+    def unfreeze_mandate(self, mandate_id: str) -> None:
+        """Unfreeze a mandate, resetting its circuit breaker state."""
+        with self._lock:
+            with self._immediate() as cur:
+                cur.execute(
+                    "DELETE FROM frozen_mandates WHERE mandate_id = ?",
+                    (mandate_id,),
+                )
 
     def list_recent_spends(self, mandate_id: str) -> list[dict[str, Any]]:
         """Return list of spend ledger records for a mandate in chronological order."""

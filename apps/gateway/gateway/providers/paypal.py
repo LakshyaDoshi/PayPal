@@ -334,6 +334,13 @@ class PayPalProvider(PaymentProvider):
             debug_id,
         )
 
+        if status_code == 401:
+            raise ProviderAuthError(
+                "PayPal authentication failed with HTTP 401 Unauthorized.",
+                status_code=status_code,
+                debug_id=debug_id,
+            )
+
         if status_code not in (200, 201):
             error_name = data.get("name") or "ORDER_CREATION_FAILED"
             error_msg = data.get("message") or resp.text
@@ -345,6 +352,13 @@ class PayPalProvider(PaymentProvider):
             )
 
         order_id = data.get("id") or ""
+        if not order_id:
+            raise ProviderError(
+                "PayPal order response is malformed: missing 'id'.",
+                status_code=status_code,
+                debug_id=debug_id,
+                details=data,
+            )
         raw_status = data.get("status", "CREATED").upper()
 
         status_mapping = {
@@ -429,6 +443,13 @@ class PayPalProvider(PaymentProvider):
             debug_id,
         )
 
+        if status_code == 401:
+            raise ProviderAuthError(
+                "PayPal authentication failed with HTTP 401 Unauthorized.",
+                status_code=status_code,
+                debug_id=debug_id,
+            )
+
         if status_code not in (200, 201):
             error_name = data.get("name") or "PAYOUT_FAILED"
             error_msg = data.get("message") or resp.text
@@ -441,6 +462,13 @@ class PayPalProvider(PaymentProvider):
 
         batch_header = data.get("batch_header", {})
         payout_batch_id = batch_header.get("payout_batch_id") or ""
+        if not payout_batch_id:
+            raise ProviderError(
+                "PayPal payout response is malformed: missing 'payout_batch_id'.",
+                status_code=status_code,
+                debug_id=debug_id,
+                details=data,
+            )
         batch_status = batch_header.get("batch_status", "PENDING").upper()
 
         status_mapping = {
@@ -505,6 +533,13 @@ class PayPalProvider(PaymentProvider):
             debug_id,
         )
 
+        if status_code == 401:
+            raise ProviderAuthError(
+                "PayPal authentication failed with HTTP 401 Unauthorized.",
+                status_code=status_code,
+                debug_id=debug_id,
+            )
+
         if status_code not in (200, 201):
             error_name = data.get("name") or "INVOICE_PAYMENT_FAILED"
             error_msg = data.get("message") or resp.text
@@ -515,7 +550,14 @@ class PayPalProvider(PaymentProvider):
                 details=data,
             )
 
-        payment_id = data.get("payment_id") or f"inv_pay_{invoice_id}"
+        payment_id = data.get("payment_id")
+        if not payment_id:
+            raise ProviderError(
+                "PayPal invoice payment response is malformed: missing 'payment_id'.",
+                status_code=status_code,
+                debug_id=debug_id,
+                details=data,
+            )
         return ProviderPaymentResult(
             provider_reference=payment_id,
             status=PaymentStatus.COMPLETED,

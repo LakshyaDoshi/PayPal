@@ -34,22 +34,28 @@ from gateway.contract import Mandate
 # Startup key guard
 # ---------------------------------------------------------------------------
 
-_RAW_KEY: str = os.environ.get("MANDATE_SIGNING_KEY", "")
 
-if not _RAW_KEY:
-    raise RuntimeError(
-        "MANDATE_SIGNING_KEY environment variable is not set. "
-        "MandateGate cannot start without a signing key."
-    )
+def get_signing_key() -> bytes:
+    """Retrieve and validate the active signing key from environment.
 
-if len(_RAW_KEY) < 32:
-    raise RuntimeError(
-        f"MANDATE_SIGNING_KEY is too short ({len(_RAW_KEY)} chars). "
-        "Minimum length is 32 characters."
-    )
+    Refuses if key is missing or shorter than 32 characters.
+    Never logs or exposes the raw secret.
+    """
+    raw = os.environ.get("MANDATE_SIGNING_KEY", "")
+    if not raw:
+        raise RuntimeError(
+            "MANDATE_SIGNING_KEY environment variable is not set. "
+            "MandateGate cannot operate without a signing key."
+        )
+    if len(raw) < 32:
+        raise RuntimeError(
+            f"MANDATE_SIGNING_KEY is too short ({len(raw)} chars). Minimum length is 32 characters."
+        )
+    return raw.encode("utf-8")
 
-# Keep the encoded key in memory; never log or expose the raw string.
-_SIGNING_KEY: bytes = _RAW_KEY.encode("utf-8")
+
+# Startup validation: verify key presence and length on import
+_SIGNING_KEY: bytes = get_signing_key()
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -71,8 +77,8 @@ def _canonical_bytes(data: dict[str, Any]) -> bytes:
 
 
 def _compute_hmac(payload: bytes) -> str:
-    """Compute HMAC-SHA256 over *payload* using the module signing key."""
-    return hmac.new(_SIGNING_KEY, payload, hashlib.sha256).hexdigest()
+    """Compute HMAC-SHA256 over *payload* using the active signing key."""
+    return hmac.new(get_signing_key(), payload, hashlib.sha256).hexdigest()
 
 
 def canonical_dict(mandate: Mandate) -> dict[str, Any]:

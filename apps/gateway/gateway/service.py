@@ -19,6 +19,9 @@ Core Invariants:
 from __future__ import annotations
 
 import logging
+import os
+import re
+import sqlite3
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -27,11 +30,31 @@ from pydantic import BaseModel, ConfigDict, Field
 from gateway.contract import Decision, PaymentRequest, RuleResult, Verdict
 from gateway.judge import JudgeContext, JudgeVerdict, evaluate_transaction
 from gateway.llm import LLMClient
-from gateway.providers.base import PaymentProvider, ProviderPaymentResult
+from gateway.providers.base import (
+    PaymentProvider,
+    ProviderAuthError,
+    ProviderConnectionError,
+    ProviderError,
+    ProviderPaymentResult,
+    ProviderTimeoutError,
+)
 from gateway.rules import HistoricalPayment, RuleContext, evaluate, overall
 from gateway.store import MandateStore
 
 logger = logging.getLogger("gateway.service")
+
+
+def _sanitize_log_message(msg: str) -> str:
+    """Sanitize secrets from error strings before logging."""
+    signing_key = os.environ.get("MANDATE_SIGNING_KEY", "")
+    client_secret = os.environ.get("PAYPAL_CLIENT_SECRET", "")
+    sanitized = msg
+    if signing_key and len(signing_key) >= 8:
+        sanitized = sanitized.replace(signing_key, "[REDACTED_SIGNING_KEY]")
+    if client_secret and len(client_secret) >= 8:
+        sanitized = sanitized.replace(client_secret, "[REDACTED_CLIENT_SECRET]")
+    sanitized = re.sub(r"Bearer\s+[A-Za-z0-9_\-\.]+", "Bearer [REDACTED_TOKEN]", sanitized)
+    return sanitized
 
 
 class GatewayResult(BaseModel):
@@ -64,6 +87,33 @@ class GatewayService:
         self.provider = provider
         self.llm_client = llm_client
 
+    def _record_block_and_check_circuit_breaker(
+        self,
+        decision: Decision,
+        mandate_id: str,
+    ) -> None:
+        """Persist a BLOCK decision and freeze mandate if consecutive block threshold is met."""
+        self.store.save_decision(decision, mandate_id=mandate_id)
+        threshold = int(os.environ.get("CIRCUIT_BREAKER_MAX_BLOCKS", "5"))
+        if threshold > 0:
+            consecutive = self.store.consecutive_blocks(mandate_id)
+            if consecutive >= threshold:
+                logger.warning(
+                    "Circuit breaker tripped for mandate '%s' "
+                    "(%d consecutive blocks >= threshold %d). Freezing mandate.",
+                    mandate_id,
+                    consecutive,
+                    threshold,
+                )
+                self.store.freeze_mandate(
+                    mandate_id=mandate_id,
+                    reason=(
+                        f"Circuit breaker tripped: {consecutive} consecutive blocked attempts "
+                        f"reached threshold of {threshold}."
+                    ),
+                    consecutive_blocks=consecutive,
+                )
+
     async def process(
         self,
         request: PaymentRequest,
@@ -75,6 +125,7 @@ class GatewayService:
         """
         decision_id = f"dec_{uuid4().hex[:16]}"
         created_at = datetime.now(UTC)
+        reserved = False
 
         try:
             # 1. Load mandate by ID (agent never supplies signature or limits)
@@ -99,7 +150,28 @@ class GatewayService:
                 self.store.save_decision(decision, mandate_id=request.mandate_id)
                 return GatewayResult(decision=decision, provider_result=None)
 
-            # 2. Build execution context from persistent state
+            # 2. Circuit Breaker Check: is mandate frozen?
+            if self.store.is_frozen(request.mandate_id):
+                logger.warning(
+                    "Mandate '%s' is frozen by circuit breaker. Failing closed to BLOCK.",
+                    request.mandate_id,
+                )
+                frozen_rule = RuleResult(
+                    name="circuit_breaker",
+                    passed=False,
+                    detail=f"Mandate '{request.mandate_id}' is frozen by circuit breaker.",
+                )
+                decision = Decision(
+                    id=decision_id,
+                    verdict=Verdict.BLOCK,
+                    rule_results=[frozen_rule],
+                    judge_reason=None,
+                    created_at=created_at,
+                )
+                self.store.save_decision(decision, mandate_id=request.mandate_id)
+                return GatewayResult(decision=decision, provider_result=None)
+
+            # 3. Build execution context from persistent state
             history_dicts = self.store.list_recent_spends(request.mandate_id)
             history: list[HistoricalPayment] = []
             for h in history_dicts:
@@ -126,11 +198,11 @@ class GatewayService:
                 recent_approved_payments=history,
             )
 
-            # 3. Deterministic rule engine evaluation
+            # 4. Deterministic rule engine evaluation
             rule_results = evaluate(request, mandate, ctx)
             rule_verdict = overall(rule_results)
 
-            # 4. Handle immediate blocking rule failures
+            # 5. Handle immediate blocking rule failures
             if rule_verdict == Verdict.BLOCK:
                 failed_names = [r.name for r in rule_results if not r.passed]
                 logger.warning(
@@ -145,10 +217,10 @@ class GatewayService:
                     judge_reason=None,
                     created_at=created_at,
                 )
-                self.store.save_decision(decision, mandate_id=mandate.id)
+                self._record_block_and_check_circuit_breaker(decision, mandate_id=mandate.id)
                 return GatewayResult(decision=decision, provider_result=None)
 
-            # 5. Handle rule engine human escalation requirement (needs_human)
+            # 6. Handle rule engine human escalation requirement (needs_human)
             if rule_verdict == Verdict.ESCALATE:
                 logger.info(
                     "Payment exceeds threshold under mandate '%s'. Escalating to human.",
@@ -174,7 +246,7 @@ class GatewayService:
                 )
                 return GatewayResult(decision=decision, provider_result=None)
 
-            # 6. Rules passed! Execute advisory AI Safety Judge
+            # 7. Rules passed! Execute advisory AI Safety Judge
             judge_summary = (
                 f"Total spend so far: {spend_so_far} {mandate.currency} across "
                 f"{len(history)} approved payments."
@@ -204,7 +276,7 @@ class GatewayService:
                     judge_reason=judge_reason,
                     created_at=created_at,
                 )
-                self.store.save_decision(decision, mandate_id=mandate.id)
+                self._record_block_and_check_circuit_breaker(decision, mandate_id=mandate.id)
                 return GatewayResult(decision=decision, provider_result=None)
 
             if judge_output.verdict == JudgeVerdict.ESCALATE:
@@ -233,7 +305,7 @@ class GatewayService:
                 )
                 return GatewayResult(decision=decision, provider_result=None)
 
-            # 7. Both rules and judge approved (judge returned 'ok')
+            # 8. Both rules and judge approved (judge returned 'ok')
             # Atomically reserve spend in SQLite BEGIN IMMEDIATE transaction
             reserved = self.store.reserve_spend(
                 mandate_id=mandate.id,
@@ -247,13 +319,13 @@ class GatewayService:
 
             if not reserved:
                 logger.warning(
-                    "Atomic spend reservation failed (budget exhausted) for mandate '%s'.",
+                    "Atomic spend reservation failed (exhausted or duplicate) for mandate '%s'.",
                     mandate.id,
                 )
                 budget_fail = RuleResult(
-                    name="reserve_spend",
+                    name="within_budget",
                     passed=False,
-                    detail="Atomic spend reservation failed due to concurrent budget exhaustion.",
+                    detail="Spend reservation failed due to budget exhaustion or duplicate.",
                 )
                 decision = Decision(
                     id=decision_id,
@@ -262,10 +334,10 @@ class GatewayService:
                     judge_reason=judge_reason,
                     created_at=created_at,
                 )
-                self.store.save_decision(decision, mandate_id=mandate.id)
+                self._record_block_and_check_circuit_breaker(decision, mandate_id=mandate.id)
                 return GatewayResult(decision=decision, provider_result=None)
 
-            # 8. Call Payment Provider
+            # 9. Call Payment Provider
             provider_result: ProviderPaymentResult
             if operation == "pay_invoice":
                 provider_result = await self.provider.pay_invoice(
@@ -304,15 +376,41 @@ class GatewayService:
 
         except Exception as exc:
             # FAIL CLOSED: Any unhandled exception or crash defaults to BLOCK
+            if reserved:
+                try:
+                    self.store.release_spend(request.mandate_id, decision_id)
+                except Exception as rollback_err:
+                    logger.warning("Failed to rollback reserved spend on error: %s", rollback_err)
+
+            # Determine granular reason_code based on exception type
+            if isinstance(exc, ProviderTimeoutError):
+                reason_code = "provider_timeout"
+            elif isinstance(exc, ProviderAuthError):
+                reason_code = "provider_auth_error"
+            elif isinstance(exc, ProviderConnectionError):
+                reason_code = "provider_connection_error"
+            elif isinstance(exc, ProviderError):
+                reason_code = "provider_error"
+            elif isinstance(exc, sqlite3.OperationalError) and "locked" in str(exc).lower():
+                reason_code = "database_locked"
+            elif isinstance(exc, sqlite3.Error):
+                reason_code = "database_error"
+            elif "signing_key" in str(exc).lower():
+                reason_code = "signing_key_invalid"
+            else:
+                reason_code = "gateway_error"
+
+            sanitized_msg = _sanitize_log_message(str(exc))
             logger.warning(
-                "GatewayService processing exception (failing closed to BLOCK): %s: %s",
+                "GatewayService processing exception (failing closed to BLOCK) [%s]: %s: %s",
+                reason_code,
                 type(exc).__name__,
-                str(exc),
+                sanitized_msg,
             )
             error_rule = RuleResult(
-                name="gateway_error",
+                name=reason_code,
                 passed=False,
-                detail=f"Unhandled internal gateway error: {type(exc).__name__}.",
+                detail=f"Unhandled internal gateway error: {reason_code}.",
             )
             decision = Decision(
                 id=decision_id,
@@ -322,7 +420,9 @@ class GatewayService:
                 created_at=created_at,
             )
             try:
-                self.store.save_decision(decision, mandate_id=request.mandate_id)
+                self._record_block_and_check_circuit_breaker(
+                    decision, mandate_id=request.mandate_id
+                )
             except Exception as store_err:
                 logger.warning(
                     "Failed to record error decision to audit store: %s",
