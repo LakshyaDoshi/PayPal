@@ -32,6 +32,48 @@
         }
       }
     },
+    "/mandates/draft": {
+      "post": {
+        "tags": [
+          "Mandates"
+        ],
+        "summary": "Generate Mandate Proposal from Prompt",
+        "description": "Transforms a natural language task description into an unsigned structured proposal or requests missing parameters. Does not sign or activate anything.",
+        "operationId": "create_mandate_draft_mandates_draft_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MandateDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/mandates": {
       "post": {
         "tags": [
@@ -568,6 +610,53 @@
         "title": "Decision",
         "description": "Audit record and enforcement verdict produced for a PaymentRequest."
       },
+      "DraftResult": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'ready' when complete, 'needs_info' if incomplete."
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MandateProposal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Unsigned proposal if status is 'ready'."
+          },
+          "fields_needed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Fields Needed",
+            "description": "Missing essential fields requiring user clarification."
+          },
+          "clarification_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clarification Prompt",
+            "description": "Helpful question prompting user for missing details."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "DraftResult",
+        "description": "Result of processing a natural language mandate draft request."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -773,6 +862,130 @@
         ],
         "title": "MandateDraft",
         "description": "Draft policy submitted by UI/user to be confirmed and signed."
+      },
+      "MandateDraftRequest": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Prompt",
+            "description": "User's task description."
+          },
+          "candidate_payees": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Payees",
+            "description": "Optional explicit candidate payees or shops."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "title": "MandateDraftRequest",
+        "description": "Natural language task prompt submitted to generate an unsigned proposal."
+      },
+      "MandateProposal": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Unique generated draft ID."
+          },
+          "purpose": {
+            "type": "string",
+            "title": "Purpose",
+            "description": "Normalized task description."
+          },
+          "max_amount_minor": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Amount Minor",
+            "description": "Spending cap in integer cents."
+          },
+          "currency": {
+            "type": "string",
+            "maxLength": 3,
+            "minLength": 3,
+            "title": "Currency",
+            "description": "ISO 4217 currency."
+          },
+          "allowed_payees": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Allowed Payees",
+            "description": "Explicit named payees."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At",
+            "description": "UTC expiration timestamp."
+          },
+          "approval_threshold_minor": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Threshold Minor",
+            "description": "Optional threshold for human approval."
+          },
+          "max_payments_per_window": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Payments Per Window"
+          },
+          "window_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Seconds"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "purpose",
+          "max_amount_minor",
+          "currency",
+          "allowed_payees",
+          "expires_at"
+        ],
+        "title": "MandateProposal",
+        "description": "Unsigned structured mandate proposal returned to user for review."
       },
       "PaymentRequest": {
         "properties": {

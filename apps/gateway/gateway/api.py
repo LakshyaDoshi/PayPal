@@ -5,6 +5,7 @@ FastAPI web application exposing MandateGate to the user interface and external 
 
 Endpoints:
 - GET /health & /healthz
+- POST /mandates/draft (generate unsigned structured proposal from natural language task)
 - POST /mandates (confirm and sign a draft policy)
 - GET /mandates/{mandate_id}
 - POST /mandates/{mandate_id}/revoke (kill switch, effective immediately on next request)
@@ -44,6 +45,7 @@ from sse_starlette.sse import EventSourceResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from gateway.contract import Decision, Mandate, PaymentRequest, RuleResult, Verdict
+from gateway.drafter import DraftResult, draft_mandate
 from gateway.llm import get_llm_client
 from gateway.mandate import sign, verify
 from gateway.providers.base import PaymentProvider
@@ -106,6 +108,17 @@ def get_service(store: MandateStore = Depends(get_store)) -> GatewayService:
 # ---------------------------------------------------------------------------
 # Request & Response Models
 # ---------------------------------------------------------------------------
+
+
+class MandateDraftRequest(BaseModel):
+    """Natural language task prompt submitted to generate an unsigned proposal."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    prompt: str = Field(..., min_length=1, max_length=2000, description="User's task description.")
+    candidate_payees: list[str] | None = Field(
+        default=None, description="Optional explicit candidate payees or shops."
+    )
 
 
 class MandateDraft(BaseModel):
@@ -308,6 +321,29 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> Respo
 async def health_check() -> dict[str, str]:
     """Verify service health and sandbox connectivity status."""
     return {"status": "ok", "environment": "sandbox"}
+
+
+@app.post(
+    "/mandates/draft",
+    response_model=DraftResult,
+    status_code=status.HTTP_200_OK,
+    tags=["Mandates"],
+    summary="Generate Mandate Proposal from Prompt",
+    description=(
+        "Transforms a natural language task description into an unsigned structured proposal "
+        "or requests missing parameters. Does not sign or activate anything."
+    ),
+)
+async def create_mandate_draft(
+    request: MandateDraftRequest,
+    service: GatewayService = Depends(get_service),
+) -> DraftResult:
+    """Generate an unsigned mandate draft proposal using LLM extraction."""
+    return await draft_mandate(
+        prompt=request.prompt,
+        llm_client=service.llm_client,
+        candidate_payees=request.candidate_payees,
+    )
 
 
 @app.post(
