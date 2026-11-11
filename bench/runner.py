@@ -89,8 +89,12 @@ class MandateFixture(BaseModel):
     @field_validator("max_amount_minor", "approval_threshold_minor", mode="before")
     @classmethod
     def reject_float(cls, v: object) -> object:
+        if v is None:
+            return None
         if isinstance(v, float):
             raise ValueError("Monetary amounts must be integers (minor units), never float.")
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError("Monetary amounts must be integers (minor units), never float or str.")
         return v
 
 
@@ -107,8 +111,8 @@ class RequestFixture(BaseModel):
     @field_validator("amount_minor", mode="before")
     @classmethod
     def reject_float_amount(cls, v: object) -> object:
-        if isinstance(v, float):
-            raise ValueError("amount_minor must be an integer (minor units), never float.")
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError("amount_minor must be an integer (minor units), never float or str.")
         return v
 
 

@@ -96,6 +96,14 @@ class FakeLLM:
                 self._responses = list(responses)
             else:
                 self._responses = [responses]
+        else:
+            self._responses = [
+                {
+                    "verdict": "ok",
+                    "reason_code": "safe_default",
+                    "reason": "FakeLLM default response",
+                }
+            ]
         self._error_to_raise = error_to_raise
 
     def set_responses(self, responses: list[dict[str, Any] | str] | dict[str, Any] | str) -> None:

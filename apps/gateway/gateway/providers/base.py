@@ -11,7 +11,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class PaymentStatus(StrEnum):
@@ -52,6 +52,18 @@ class ProviderPaymentResult(BaseModel):
         default_factory=dict,
         description="Sanitized non-sensitive diagnostic response attributes.",
     )
+
+    @field_validator("approval_url", mode="after")
+    @classmethod
+    def validate_approval_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v_strip = v.strip()
+        if not v_strip.startswith(("https://", "http://")):
+            raise ValueError(
+                f"approval_url must use https or http scheme, got dangerous scheme: {v_strip[:15]}"
+            )
+        return v_strip
 
 
 class ProviderError(Exception):

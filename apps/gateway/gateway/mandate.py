@@ -35,12 +35,26 @@ from gateway.contract import Mandate
 # ---------------------------------------------------------------------------
 
 
+def _load_dotenv_fallback() -> None:
+    for candidate in (".env", "../.env", "../../.env"):
+        if os.path.isfile(candidate):
+            with open(candidate, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        os.environ.setdefault(k.strip(), v.strip())
+            break
+
+
 def get_signing_key() -> bytes:
     """Retrieve and validate the active signing key from environment.
 
     Refuses if key is missing or shorter than 32 characters.
     Never logs or exposes the raw secret.
     """
+    if "MANDATE_SIGNING_KEY" not in os.environ:
+        _load_dotenv_fallback()
     raw = os.environ.get("MANDATE_SIGNING_KEY", "")
     if not raw:
         raise RuntimeError(

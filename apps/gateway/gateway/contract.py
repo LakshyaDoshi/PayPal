@@ -57,6 +57,9 @@ COMMON_ISO_CURRENCIES = {
 }
 
 
+MAX_FINANCIAL_AMOUNT_MINOR = 2**63 - 1  # Maximum 64-bit signed integer
+
+
 def _validate_currency(v: str) -> str:
     """Validates that a currency code is a valid 3-letter uppercase ISO 4217 string."""
     v_upper = v.strip().upper()
@@ -67,14 +70,33 @@ def _validate_currency(v: str) -> str:
     return v_upper
 
 
-def _reject_float_for_money(v: Any, field_name: str) -> Any:
-    """Strictly reject floating-point numbers for financial amounts."""
+def _reject_non_int_for_money(v: Any, field_name: str) -> Any:
+    """Strictly reject non-integer values (floats, strings, booleans) for financial amounts.
+
+    Also bounds to strictly positive and <= MAX_FINANCIAL_AMOUNT_MINOR.
+    """
+    if v is None:
+        return None
     if isinstance(v, float):
         raise ValueError(
             f"Floating-point values are strictly prohibited for {field_name}. "
             "Use integer minor units (e.g. cents) exclusively."
         )
+    if isinstance(v, bool) or not isinstance(v, int):
+        raise ValueError(
+            f"Non-integer value '{v}' of type {type(v).__name__} is prohibited for {field_name}. "
+            "Use integer minor units (e.g. cents) exclusively."
+        )
+    if v <= 0:
+        raise ValueError(f"{field_name} must be strictly positive (> 0), got {v}.")
+    if v > MAX_FINANCIAL_AMOUNT_MINOR:
+        msg = f"{field_name} exceeds 64-bit minor unit cap ({MAX_FINANCIAL_AMOUNT_MINOR})."
+        raise ValueError(msg)
     return v
+
+
+# Backward compatibility alias
+_reject_float_for_money = _reject_non_int_for_money
 
 
 def _ensure_utc_datetime(v: Any) -> datetime:
@@ -158,6 +180,7 @@ class Mandate(BaseModel):
     max_amount_minor: int = Field(
         ...,
         gt=0,
+        le=MAX_FINANCIAL_AMOUNT_MINOR,
         description="Total lifetime spending cap allowed by this mandate in minor units (cents).",
     )
     currency: str = Field(
@@ -178,6 +201,7 @@ class Mandate(BaseModel):
     approval_threshold_minor: int | None = Field(
         default=None,
         gt=0,
+        le=MAX_FINANCIAL_AMOUNT_MINOR,
         description="Optional minor threshold requiring human review.",
     )
     max_payments_per_window: int | None = Field(
@@ -200,7 +224,7 @@ class Mandate(BaseModel):
     @field_validator("max_amount_minor", "approval_threshold_minor", mode="before")
     @classmethod
     def check_non_float_amounts(cls, v: Any, info: Any) -> Any:
-        return _reject_float_for_money(v, info.field_name)
+        return _reject_non_int_for_money(v, info.field_name)
 
     @field_validator("currency", mode="before")
     @classmethod
@@ -222,6 +246,10 @@ class Mandate(BaseModel):
             p_strip = payee.strip()
             if not p_strip:
                 raise ValueError("Payee identifier cannot be empty or whitespace.")
+            if any(c in p_strip for c in ("\r", "\n", "\0", "\t")):
+                raise ValueError("Payee identifier cannot contain newline or control characters.")
+            if "===" in p_strip or "UNTRUSTED" in p_strip:
+                raise ValueError("Payee identifier contains prohibited delimiter sequences.")
             if len(p_strip) > 255:
                 raise ValueError("Payee identifier exceeds maximum length of 255 characters.")
             cleaned.append(p_strip)
@@ -273,6 +301,7 @@ class PaymentRequest(BaseModel):
     amount_minor: int = Field(
         ...,
         gt=0,
+        le=MAX_FINANCIAL_AMOUNT_MINOR,
         description="Transaction amount in integer minor units (e.g. cents).",
     )
     currency: str = Field(
@@ -297,7 +326,7 @@ class PaymentRequest(BaseModel):
     @field_validator("amount_minor", mode="before")
     @classmethod
     def check_non_float_amount(cls, v: Any, info: Any) -> Any:
-        return _reject_float_for_money(v, info.field_name)
+        return _reject_non_int_for_money(v, info.field_name)
 
     @field_validator("currency", mode="before")
     @classmethod
@@ -310,6 +339,10 @@ class PaymentRequest(BaseModel):
         v_strip = v.strip()
         if not v_strip:
             raise ValueError("payee cannot be empty or whitespace.")
+        if any(c in v_strip for c in ("\r", "\n", "\0", "\t")):
+            raise ValueError("payee cannot contain newline or control characters.")
+        if "===" in v_strip or "UNTRUSTED" in v_strip:
+            raise ValueError("payee contains prohibited delimiter sequences.")
         return v_strip
 
 

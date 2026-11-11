@@ -92,6 +92,25 @@ class PayPalProvider(PaymentProvider):
                 "MandateGate is restricted to SANDBOX ONLY. Live PayPal endpoints are forbidden."
             )
 
+        # SSRF Protection: validate scheme and block cloud metadata endpoints
+        from urllib.parse import urlparse
+
+        parsed = urlparse(clean_base)
+        if parsed.scheme not in ("https", "http"):
+            raise ValueError(f"Invalid URL scheme '{parsed.scheme}'. Scheme must be https or http.")
+
+        hostname = (parsed.hostname or "").lower()
+        forbidden_hosts = {
+            "169.254.169.254",
+            "metadata.google.internal",
+            "metadata",
+            "instance-data",
+        }
+        if hostname in forbidden_hosts or hostname.startswith("169.254."):
+            raise ValueError(
+                f"SSRF protection: access to cloud metadata host '{hostname}' is forbidden."
+            )
+
         self.client_id = client_id
         self.client_secret = client_secret
         self.base_url = clean_base

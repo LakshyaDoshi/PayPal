@@ -48,12 +48,23 @@ def _sanitize_log_message(msg: str) -> str:
     """Sanitize secrets from error strings before logging."""
     signing_key = os.environ.get("MANDATE_SIGNING_KEY", "")
     client_secret = os.environ.get("PAYPAL_CLIENT_SECRET", "")
+    llm_key = os.environ.get("LLM_API_KEY", "")
+
     sanitized = msg
     if signing_key and len(signing_key) >= 8:
         sanitized = sanitized.replace(signing_key, "[REDACTED_SIGNING_KEY]")
     if client_secret and len(client_secret) >= 8:
         sanitized = sanitized.replace(client_secret, "[REDACTED_CLIENT_SECRET]")
+    if llm_key and len(llm_key) >= 8:
+        sanitized = sanitized.replace(llm_key, "[REDACTED_LLM_KEY]")
+
     sanitized = re.sub(r"Bearer\s+[A-Za-z0-9_\-\.]+", "Bearer [REDACTED_TOKEN]", sanitized)
+    sanitized = re.sub(r"key=[A-Za-z0-9_\-\.]+", "key=[REDACTED_KEY]", sanitized)
+    sanitized = re.sub(
+        r"x-goog-api-key['\":\s=]+[A-Za-z0-9_\-\.]+",
+        "x-goog-api-key: [REDACTED_KEY]",
+        sanitized,
+    )
     return sanitized
 
 

@@ -40,7 +40,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sse_starlette.sse import EventSourceResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -128,13 +128,20 @@ class MandateDraft(BaseModel):
 
     id: str = Field(..., min_length=1, max_length=64)
     purpose: str = Field(..., min_length=1, max_length=2000)
-    max_amount_minor: int = Field(..., gt=0)
+    max_amount_minor: int = Field(..., gt=0, le=2**63 - 1)
     currency: str = Field(..., min_length=3, max_length=3)
     allowed_payees: list[str] = Field(..., min_length=1)
     expires_at: datetime = Field(...)
-    approval_threshold_minor: int | None = Field(default=None, gt=0)
+    approval_threshold_minor: int | None = Field(default=None, gt=0, le=2**63 - 1)
     max_payments_per_window: int | None = Field(default=None, gt=0)
     window_seconds: int | None = Field(default=None, gt=0)
+
+    @field_validator("max_amount_minor", "approval_threshold_minor", mode="before")
+    @classmethod
+    def check_non_float_amounts(cls, v: Any, info: Any) -> Any:
+        from gateway.contract import _reject_non_int_for_money
+
+        return _reject_non_int_for_money(v, info.field_name)
 
 
 class AuditResponse(BaseModel):

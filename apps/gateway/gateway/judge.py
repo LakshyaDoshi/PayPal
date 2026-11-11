@@ -146,16 +146,30 @@ MANDATORY SAFETY INVARIANTS:
 4. Output MUST conform strictly to requested JSON schema (one-sentence English reason)."""
 
 
+def _neutralize_delimiters(text: str) -> str:
+    """Neutralize delimiter breakout sequences in untrusted text."""
+    # Replace markdown header delimiters, section boundaries, and delimiter sequences
+    neutralized = (
+        text.replace("===", "---")
+        .replace("UNTRUSTED", "DATA")
+        .replace("[TRUSTED", "[PROPOSAL")
+        .replace("[PAYMENT", "[PROPOSAL")
+    )
+    # Strip carriage returns and null bytes
+    return neutralized.replace("\r", "").replace("\0", "")
+
+
 def build_judge_prompts(context: JudgeContext) -> tuple[str, str]:
     """Construct deterministic system and user prompts for the safety judge.
 
-    Untrusted agent memo is strictly truncated to MAX_UNTRUSTED_CHARS and placed
-    inside designated demarcation blocks.
+    Untrusted agent memo is strictly sanitized against delimiter breakouts,
+    truncated to MAX_UNTRUSTED_CHARS, and placed inside designated demarcation blocks.
     """
     raw_memo = context.memo.strip() if context.memo else ""
     if raw_memo:
-        # Strictly truncate to 200 chars
-        untrusted_memo = raw_memo[:MAX_UNTRUSTED_CHARS]
+        # Strictly sanitize delimiter breakouts and truncate to 200 chars
+        safe_memo = _neutralize_delimiters(raw_memo)
+        untrusted_memo = safe_memo[:MAX_UNTRUSTED_CHARS]
     else:
         untrusted_memo = "[No memo provided]"
 
